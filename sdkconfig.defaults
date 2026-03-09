@@ -1,0 +1,20 @@
+# Target
+CONFIG_IDF_TARGET="esp32h2"
+
+# Zigbee - End Device (simpler interview, no routing overhead)
+CONFIG_ZB_ENABLED=y
+CONFIG_ZB_ZED=y
+
+# Zigbee stack size
+CONFIG_ZB_STACK_SIZE=8192
+
+# Custom partition table with zb_storage for Zigbee NVRAM
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# NVS for Zigbee network keys
+CONFIG_NVS_FLASH=y
+
+# FreeRTOS
+CONFIG_FREERTOS_HZ=1000
+
