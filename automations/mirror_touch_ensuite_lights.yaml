@@ -1,0 +1,48 @@
+alias: Mirror touch → En-suite lights
+description: >
+  Reads the mirror touch controller's WW (CH1) and CW (CH2) PWM duty cycles
+  and controls the master en-suite Hue lights accordingly.
+
+  - Both channels zero  → lights off
+  - Otherwise           → lights on, colour temp and brightness derived from
+                          the relative WW/CW mix and combined duty level.
+
+  Colour temp range matches the Hue group: 2202 K (warm) – 6535 K (cool).
+  Brightness = average of both channels (0–100 %).
+
+trigger:
+  - platform: state
+    entity_id:
+      - sensor.diy_pwmsensor_ch1_duty_cycle   # CH1 = WW (warm white)
+      - sensor.diy_pwmsensor_ch2_duty_cycle   # CH2 = CW (cool white)
+
+variables:
+  ww: "{{ states('sensor.diy_pwmsensor_ch1_duty_cycle') | float(0) }}"
+  cw: "{{ states('sensor.diy_pwmsensor_ch2_duty_cycle') | float(0) }}"
+  total: "{{ ww + cw }}"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ ww == 0 and cw == 0 }}"
+        sequence:
+          - service: light.turn_off
+            target:
+              entity_id: light.master_en_suite
+
+      - conditions:
+          - condition: template
+            value_template: "{{ total > 0 }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: light.master_en_suite
+            data:
+              color_temp_kelvin: >
+                {{ ((ww / total) * 2202 + (cw / total) * 6535) | int }}
+              brightness_pct: >
+                {{ (total / 2) | int }}
+
+mode: single
+max_exceeded: silent
