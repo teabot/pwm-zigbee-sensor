@@ -18,22 +18,49 @@ This firmware runs on an **ESP32-H2** dev board installed inside the mirror hous
 
 ## What it does
 
-- Captures PWM signals on **GPIO 4** (CH0) and **GPIO 5** (CH1) using the MCPWM hardware capture peripheral
+- Captures PWM signals on **GPIO 4** (CH1 = WW) and **GPIO 5** (CH2 = CW) using the MCPWM hardware capture peripheral
 - Measures duty cycle as a percentage (0.0–100.0 %)
 - Joins a Zigbee network as an **End Device** and reports duty cycle via the **Relative Humidity cluster** (0x0405), which ZHA auto-discovers as sensor entities
 - Only sends a Zigbee update when the duty cycle changes by more than **0.5 %** (dead-band) to avoid flooding the network
 
 ## Hardware
 
+### ESP32-H2 board
+
 | Item | Detail |
 |------|--------|
+| Board | Waveshare ESP32-H2-Zero Mini |
 | SoC | ESP32-H2 (RISC-V, native IEEE 802.15.4) |
 | Flash | 4 MB |
-| PWM input CH0 | GPIO 4 (internal pull-up enabled) |
-| PWM input CH1 | GPIO 5 (internal pull-up enabled) |
+| PWM input CH1 (WW) | GPIO 4 |
+| PWM input CH2 (CW) | GPIO 5 |
 | Zigbee role | End Device |
 
-> The internal pull-ups mean floating inputs read as logic-high (100 % duty). Drive the inputs from a low-impedance source or disable `pull_up` in `pwm_capture.c` if that causes issues.
+> GPIO 4 and 5 have internal pull-ups enabled. Floating inputs read as logic-high (100 % duty). Drive from a low-impedance source or disable `pull_up` in `pwm_capture.c`.
+
+### Signal conditioning
+
+The touch controller outputs 12–24 V PWM (≈1 kHz). Each channel is stepped down to 3.3 V logic via a resistor voltage divider before connecting to the ESP32-H2 GPIO:
+
+```
+PWM (12–24V) ──[ R1: 6.8kΩ ]──┬── GPIO
+                               [ R2: 1kΩ ]
+                               [C: 100nF]  (noise suppression, across R2)
+                                │
+                               GND
+```
+
+| Component | Value | Purpose |
+|-----------|-------|---------|
+| R1 | 6.8 kΩ | Series dropper |
+| R2 | 1 kΩ | Lower leg of divider |
+| C | 100 nF | Noise filter across R2 |
+
+Output voltage at GPIO: 1.0 V (12 V input) – 3.2 V (24 V input). Safe for 3.3 V GPIO.
+
+### Power supply
+
+A 12–24 V → 5 V buck converter module feeds the board's 5 V pin. The ESP32-H2-Zero draws ≈100–200 mA — well within the 1 A available from the LED driver supply.
 
 ## Dependencies
 
@@ -73,25 +100,71 @@ idf.py flash
 
 ## Pairing with ZHA (Home Assistant)
 
-1. Flash the firmware (erase-flash recommended for a clean pair)
-2. In Home Assistant: **Settings → Devices & Services → Zigbee Home Automation → Add Device** (opens permit join)
-3. The device joins within a few seconds and ZHA runs the interview automatically
-4. Two sensor entities appear — one per channel — labelled as humidity sensors (see note below)
+1. Flash the firmware (`erase-flash` recommended for a clean pair)
+2. Copy `quirk/pwm_zigbee_sensor.py` to `/config/custom_zha_quirks/` on your HA instance
+3. Add to `configuration.yaml` if not already present:
+   ```yaml
+   zha:
+     custom_quirks_path: /config/custom_zha_quirks
+   ```
+4. Restart Home Assistant
+5. **Settings → Devices & Services → Zigbee Home Automation → Add Device** (opens permit join)
+6. The device joins within a few seconds and ZHA runs the interview automatically
 
 ### Entities
 
-ZHA creates two sensor entities:
+ZHA creates two sensor entities (rename via the entity edit UI if needed):
 
-| Entity ID | Endpoint | Notes |
-|-----------|----------|-------|
-| `sensor.pwmsensor_duty_cycle` | CH0 (GPIO 4) | |
-| `sensor.pwmsensor_duty_cycle_2` | CH1 (GPIO 5) | |
+| Entity ID | Channel | Signal | GPIO |
+|-----------|---------|--------|------|
+| `sensor.diy_pwmsensor_ch1_duty_cycle` | CH1 | WW (warm white) | GPIO 4 |
+| `sensor.diy_pwmsensor_ch2_duty_cycle` | CH2 | CW (cool white) | GPIO 5 |
 
-The friendly name defaults to "Humidity" (a ZHA platform constraint — see [Zigbee cluster choice](#zigbee-cluster-choice)). Rename in HA to reflect actual meaning:
+The friendly name defaults to "Humidity" — a ZHA platform limitation. See [Zigbee cluster choice](#zigbee-cluster-choice).
 
-**Settings → Devices & Services → ZHA → Devices → [device] → click entity → pencil icon**
+### Testing without hardware
 
-Suggested names: **PWM CH0 Duty** / **PWM CH1 Duty**
+Use **Developer Tools → States** in HA to set entity values manually and test automations:
+
+| CH1 (WW) | CH2 (CW) | Expected result |
+|----------|----------|-----------------|
+| `0.0` | `0.0` | Lights off |
+| `80.0` | `20.0` | Warm white, ~50 % brightness |
+| `20.0` | `80.0` | Cool white, ~50 % brightness |
+| `50.0` | `50.0` | Neutral white, 50 % brightness |
+
+## Home Assistant automations
+
+Automation YAML files are stored in `automations/` and should be imported into HA or referenced from `configuration.yaml`.
+
+### Mirror touch → En-suite lights (`automations/mirror_touch_ensuite_lights.yaml`)
+
+**Entity:** `automation.mirror_touch_en_suite_lights`
+
+Controls `light.master_en_suite` (Hue room group: Toilet, Shower head, Shower entrance, Basin) based on the mirror touch controller output.
+
+| Condition | Action |
+|-----------|--------|
+| Both CH1 and CH2 = 0 % | Turn lights off |
+| Either channel > 0 % | Turn lights on with colour temp and brightness derived from WW/CW mix |
+
+**Colour temperature mapping:**
+
+The Hue group supports 2202 K – 6535 K. Colour temp is a weighted average of the two channels:
+
+```
+color_temp_kelvin = (WW / total) × 2202 + (CW / total) × 6535
+brightness_pct    = (WW + CW) / 2
+```
+
+Examples:
+
+| WW | CW | Colour temp | Brightness |
+|----|----|-------------|------------|
+| 100 | 0 | 2202 K (warmest) | 50 % |
+| 0 | 100 | 6535 K (coolest) | 50 % |
+| 50 | 50 | 4369 K (neutral) | 50 % |
+| 100 | 100 | 4369 K (neutral) | 100 % |
 
 ## Project structure
 
@@ -100,6 +173,10 @@ Suggested names: **PWM CH0 Duty** / **PWM CH1 Duty**
 ├── CMakeLists.txt              # Top-level project CMake
 ├── sdkconfig.defaults          # Kconfig defaults (Zigbee ED, custom partitions)
 ├── partitions.csv              # Custom partition table (includes zb_storage for ZBOSS NVRAM)
+├── quirk/
+│   └── pwm_zigbee_sensor.py   # ZHA custom quirk (deploy to /config/custom_zha_quirks/)
+├── automations/
+│   └── mirror_touch_ensuite_lights.yaml
 └── main/
     ├── CMakeLists.txt
     ├── idf_component.yml       # Component manager dependencies
@@ -130,23 +207,9 @@ measured_value (uint16) = duty_percent × 100
 
 ZHA divides by 100 to display, so 5000 → 50.00 %.
 
-The ZHA quirk (`quirk/pwm_zigbee_sensor.py`) overrides `ep_attribute = "duty_cycle"` on the cluster so entity IDs use `duty_cycle` rather than `humidity`. The friendly name is still set by ZHA's sensor platform and must be renamed manually in HA.
-
 ### ZHA quirk
 
-A custom quirk is provided in `quirk/pwm_zigbee_sensor.py`. It:
-- Matches the device by manufacturer (`Teabot`) and model (`PWMSensor`)
-- Replaces the stock `RelativeHumidity` cluster with `PwmDutyCycleCluster` which sets `ep_attribute = "duty_cycle"`
-- Ensures entity IDs are `sensor.pwmsensor_duty_cycle` / `sensor.pwmsensor_duty_cycle_2`
-
-**Deployment:**
-1. Copy `quirk/pwm_zigbee_sensor.py` to `/config/custom_zha_quirks/` on your HA instance
-2. Add to `configuration.yaml`:
-   ```yaml
-   zha:
-     custom_quirks_path: /config/custom_zha_quirks
-   ```
-3. Restart HA, remove and re-pair the device
+`quirk/pwm_zigbee_sensor.py` matches the device by manufacturer (`Teabot`) and model (`PWMSensor`), ensuring ZHA correctly identifies the device and applies the right cluster handlers. The quirk uses the standard `RelativeHumidity` cluster — the device identity match is the primary value it provides.
 
 ### Reporting
 
@@ -169,7 +232,7 @@ ZBOSS requires a `zb_storage` FAT partition for its NVRAM (network keys, channel
 ### Serial monitor
 
 ```bash
-# idf.py monitor requires a TTY; use it from a real terminal, not a subprocess
+# idf.py monitor requires a TTY; run from a real terminal
 idf.py monitor
 ```
 
@@ -185,5 +248,6 @@ Key log tags:
 | `Failed to find zb_storage partition` | Wrong partition table flashed | `idf.py erase-flash flash` |
 | `Network steering failed` retrying | ZHA permit join not open | Open permit join in ZHA, device joins automatically |
 | ZHA interview never completes | Device too far from coordinator | Move closer; check LQI in ZHA device page (needs > ~20) |
-| Entities show 0 % with no PWM source | Inputs floating high, then timeout | Expected — connect a PWM source |
+| Entities show 0 % with no PWM source | Inputs floating, then timeout | Expected — connect a PWM source |
 | Binary too large | `CONFIG_LOG_DEFAULT_LEVEL_DEBUG` set | Remove debug log level from sdkconfig.defaults |
+| Quirk not matching | Quirk not deployed or HA not restarted | Re-check deployment path and restart HA |
