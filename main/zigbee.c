@@ -29,7 +29,7 @@ static const char *TAG = "zigbee";
 static esp_zb_attribute_list_t *make_humidity_cluster(void)
 {
     // Relative Humidity cluster (0x0405) — ZHA auto-creates sensor entities for this.
-    // measured_value = duty_percent * 100  (so 50% → 5000; ZHA divides by 100 to display)
+    // measured_value = duty_percent * 100  (so 50.0% → 5000; ZHA divides by 100 to display)
     esp_zb_humidity_meas_cluster_cfg_t cfg = {
         .measured_value = 0,
         .min_value      = 0,
@@ -48,7 +48,7 @@ static void add_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id)
         .power_source = 0x01,  // mains
     };
     // ZCL strings: first byte is length, followed by characters (no null terminator)
-    static char manufacturer[] = "\x03" "DIY";
+    static char manufacturer[] = "\x06" "Teabot";
     static char model_id[]     = "\x09" "PWMSensor";
 
     esp_zb_attribute_list_t *basic = esp_zb_basic_cluster_create(&basic_cfg);
@@ -186,7 +186,6 @@ void zigbee_init(void)
 
 void zigbee_set_duty(uint8_t endpoint, float duty)
 {
-    // Humidity cluster stores measured_value as duty_percent * 100 (uint16)
     uint16_t val = (uint16_t)(duty * 100.0f);
 
     esp_zb_lock_acquire(portMAX_DELAY);

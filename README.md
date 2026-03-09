@@ -64,9 +64,16 @@ idf.py flash
 3. The device joins within a few seconds and ZHA runs the interview automatically
 4. Two sensor entities appear — one per channel — labelled as humidity sensors (see note below)
 
-### Renaming entities
+### Entities
 
-ZHA creates the entities as `sensor.<device>_humidity` and `sensor.<device>_humidity_2` because we use the Relative Humidity cluster (the only ZHA-auto-discovered cluster that maps cleanly to a 0–100 % value). Rename them in HA:
+ZHA creates two sensor entities:
+
+| Entity ID | Endpoint | Notes |
+|-----------|----------|-------|
+| `sensor.pwmsensor_duty_cycle` | CH0 (GPIO 4) | |
+| `sensor.pwmsensor_duty_cycle_2` | CH1 (GPIO 5) | |
+
+The friendly name defaults to "Humidity" (a ZHA platform constraint — see [Zigbee cluster choice](#zigbee-cluster-choice)). Rename in HA to reflect actual meaning:
 
 **Settings → Devices & Services → ZHA → Devices → [device] → click entity → pencil icon**
 
@@ -101,13 +108,31 @@ Results are mutex-protected. If no edge is seen for **500 ms** (`PWM_CAPTURE_TIM
 
 ### Zigbee cluster choice
 
-ZHA does not auto-create sensor entities for the **Analog Input** cluster (0x000C) on unknown devices — it requires a custom quirk. The **Relative Humidity** cluster (0x0405) is natively discovered by ZHA and creates a `sensor` entity automatically. The value mapping is:
+ZHA does not auto-create sensor entities for the **Analog Input** cluster (0x000C) on unknown devices — it requires a full custom HA component, not just a quirk. The **Relative Humidity** cluster (0x0405) is natively discovered by ZHA and creates a `sensor` entity automatically. The value mapping is:
 
 ```
 measured_value (uint16) = duty_percent × 100
 ```
 
 ZHA divides by 100 to display, so 5000 → 50.00 %.
+
+The ZHA quirk (`quirk/pwm_zigbee_sensor.py`) overrides `ep_attribute = "duty_cycle"` on the cluster so entity IDs use `duty_cycle` rather than `humidity`. The friendly name is still set by ZHA's sensor platform and must be renamed manually in HA.
+
+### ZHA quirk
+
+A custom quirk is provided in `quirk/pwm_zigbee_sensor.py`. It:
+- Matches the device by manufacturer (`Teabot`) and model (`PWMSensor`)
+- Replaces the stock `RelativeHumidity` cluster with `PwmDutyCycleCluster` which sets `ep_attribute = "duty_cycle"`
+- Ensures entity IDs are `sensor.pwmsensor_duty_cycle` / `sensor.pwmsensor_duty_cycle_2`
+
+**Deployment:**
+1. Copy `quirk/pwm_zigbee_sensor.py` to `/config/custom_zha_quirks/` on your HA instance
+2. Add to `configuration.yaml`:
+   ```yaml
+   zha:
+     custom_quirks_path: /config/custom_zha_quirks
+   ```
+3. Restart HA, remove and re-pair the device
 
 ### Reporting
 
