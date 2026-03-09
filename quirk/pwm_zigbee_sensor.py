@@ -5,7 +5,6 @@ from zigpy.quirks import CustomDevice
 from zigpy.zcl.clusters.general import Basic, Identify
 from zigpy.zcl.clusters.measurement import RelativeHumidity
 
-from zhaquirks import CustomCluster
 from zhaquirks.const import (
     DEVICE_TYPE,
     ENDPOINTS,
@@ -16,21 +15,16 @@ from zhaquirks.const import (
     PROFILE_ID,
 )
 
-_DEVICE_TYPE = 0x0307
-
-
-class PwmDutyCycleCluster(CustomCluster, RelativeHumidity):
-    """Relative Humidity cluster repurposed for PWM duty cycle (0–100 %).
-
-    measured_value = duty_percent * 100; ZHA divides by 100 to display.
-    Overrides ep_attribute so entity IDs reflect 'duty_cycle' not 'humidity'.
-    """
-
-    ep_attribute = "duty_cycle"
+_DEVICE_TYPE = 0x0307  # HA profile: Humidity Sensor
 
 
 class PWMZigbeeSensor(CustomDevice):
-    """Two-channel PWM duty cycle sensor (Teabot / ESP32-H2)."""
+    """Two-channel PWM duty cycle sensor (Teabot / ESP32-H2).
+
+    Duty cycle (0.0–100.0 %) is transported via the Relative Humidity cluster
+    (measured_value = duty_percent * 100). ZHA divides by 100 to display.
+    Rename the entities in HA to reflect their actual meaning.
+    """
 
     signature = {
         MANUFACTURER: "Teabot",
@@ -64,13 +58,13 @@ class PWMZigbeeSensor(CustomDevice):
             1: {
                 PROFILE_ID: zha.PROFILE_ID,
                 DEVICE_TYPE: _DEVICE_TYPE,
-                INPUT_CLUSTERS: [Basic, Identify, PwmDutyCycleCluster],
+                INPUT_CLUSTERS: [Basic, Identify, RelativeHumidity],
                 OUTPUT_CLUSTERS: [],
             },
             2: {
                 PROFILE_ID: zha.PROFILE_ID,
                 DEVICE_TYPE: _DEVICE_TYPE,
-                INPUT_CLUSTERS: [Basic, Identify, PwmDutyCycleCluster],
+                INPUT_CLUSTERS: [Basic, Identify, RelativeHumidity],
                 OUTPUT_CLUSTERS: [],
             },
         },
