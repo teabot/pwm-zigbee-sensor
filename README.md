@@ -1,6 +1,20 @@
 # pwm-zigbee-sensor
 
-ESP32-H2 firmware that measures the duty cycle of two PWM signals and exposes them as Zigbee sensor entities in Home Assistant via ZHA.
+## Project overview
+
+This project is part of a smart bathroom mirror lighting system.
+
+The mirror has an existing touch interface that drives WW (warm white) and CW (cool white) LED strips directly, outputting two PWM signals — one per channel — to control brightness and colour temperature. Rather than replace the touch interface, this project intercepts those PWM signals and translates them into Zigbee sensor values, integrating the mirror controls into a broader ZHA-based lighting system in Home Assistant.
+
+The mirror's LED strips are driven by a separate Zigbee LED controller instead of the original driver. This means:
+
+- The mirror lights can be activated by **room switches** via HA automations, independently of the touch interface
+- The **mirror touch interface** continues to work as before, but now controls lights across the room (or triggers automations) rather than driving the LED strips directly
+- The whole system is visible and automatable in **Home Assistant** via ZHA
+
+This firmware runs on an **ESP32-H2** dev board installed inside the mirror housing. It reads the two PWM outputs from the touch controller, measures their duty cycles, and reports them to ZHA as sensor entities. HA automations then use those values to control the Zigbee LED controller driving the mirror strips, as well as any other lights in the room.
+
+---
 
 ## What it does
 
